@@ -10,15 +10,19 @@ const LOG = {
     if (process.env.DEBUG) console.log('💡 DEBUG: ', { ...args });
   },
 };
+const handleFailure = err => {
+  LOG.error(err);
+  process.exit(1);
+};
 
-process.on('unhandledRejection', error => {
-  LOG.error('unhandledRejection', error.message);
-});
+process.on('unhandledRejection', handleFailure);
 
-if (!process.env.TOKEN) {
+if (!process.env.GITHUB_TOKEN) {
   LOG.error('no credentials found.');
   process.exit(1);
 }
+
+const TOKEN = process.env.GITHUB_TOKEN
 
 // --- ENV VAR ---
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE, 10) || 10;
@@ -26,14 +30,14 @@ const DELAY = parseInt(process.env.DELAY, 10) || 3000;
 const INTERVAL = parseInt(process.env.INTERVAL, 10) || 1;
 const INTERVAL_UNIT = process.env.INTERVAL_UNIT || 'days';
 
-// --- FILENAME ---
-const README = 'README.md';
+// --- FILES ---
 const DATA_FOLDER = 'data';
-const GITHUB_METADATA_FILE = `${DATA_FOLDER}/${dayjs().format(
-  'YYYY-MM-DDTHH.mm.ss',
-)}-fetched_repo_data.json`;
+const README = 'README.md';
+const DATE = dayjs().format('YYYY-MM-DDTHH.mm.ss');
+const GITHUB_METADATA_FILE = `${DATA_FOLDER}/${DATE}-fetched_repo_data.json`;
 const LATEST_FILENAME = `${DATA_FOLDER}/latest`;
-const GITHUB_REPOS = `${DATA_FOLDER}/list_repos.json`;
+const GITHUB_REPOS = `${DATA_FOLDER}/repository.json`;
+const Authorization = `token ${TOKEN}`
 
 // --- HTTP ---
 const API = 'https://api.github.com/';
@@ -42,16 +46,12 @@ const options = {
   headers: {
     'User-Agent': 'awesome-docker script listing',
     'Content-Type': 'application/json',
-    Authorization: `token ${process.env.TOKEN}`,
+    Authorization,
   },
 };
 
+// ----------------------------------------------------------------------------
 const removeHost = x => x.slice('https://github.com/'.length, x.length);
-const barLine = console.draft('Starting batch...');
-const handleFailure = err => {
-  LOG.error(err);
-  process.exit(1);
-};
 
 const delay = ms =>
   new Promise(resolve => {
@@ -59,7 +59,7 @@ const delay = ms =>
   });
 
 const get = (pathURL, opt) => {
-  LOG.debug(` Fetching ${pathURL}`);
+  LOG.debug(`Fetching ${pathURL}`);
   return fetch(`${API}repos/${pathURL}`, {
     ...options,
     ...opt,
@@ -83,11 +83,13 @@ const extractAllRepos = markdown => {
 const ProgressBar = (i, batchSize, total) => {
   const progress = Math.round((i / total) * 100);
   const units = Math.round(progress / 2);
+  const barLine = console.draft('Starting batch...');
   return barLine(
     `[${'='.repeat(units)}${' '.repeat(50 - units)}] ${progress}%  -  # ${i}`,
   );
 };
 
+// ----------------------------------------------------------------------------
 async function batchFetchRepoMetadata(githubRepos) {
   const repos = githubRepos.map(removeHost);
 
@@ -127,7 +129,6 @@ function shouldUpdate(lastUpdateTime) {
 async function main() {
   try {
     const lastUpdateTime = await fs.readFile(LATEST_FILENAME, 'utf8');
-
     LOG.debug('Checking if updating is needed');
     if (!shouldUpdate(lastUpdateTime)) {
       LOG.debug('Last update was less than a day ago 😅. Exiting...');
